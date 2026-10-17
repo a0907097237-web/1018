@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反應測驗</title>
+    <style>
+        body {
+            font-family: "Microsoft JhengHei", Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+            position: relative;
+            z-index: 2;
+        }
+        h1 {
+            color: #2c3e50;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        p {
+            font-size: 18px;
+            color: #555;
+            line-height: 1.6;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        #game-area {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #eef2f3;
+            display: none;
+            z-index: 1;
+        }
+        /* 標準 C 字標大小與隨機定位 */
+        .stimulus {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            transform: translate(-50%, -50%);
+        }
+        .hidden {
+            display: none !important;
+        }
+        #stats {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e67e22;
+            margin-top: 15px;
+        }
+        .key-hint {
+            display: inline-block;
+            background: #e0e0e0;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: bold;
+            color: #333;
+            margin: 0 3px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="welcome-screen">
+    <h1>反應測驗</h1>
+    <p>
+        歡迎參加測驗！<br>
+        畫面中會隨機在不同位置閃現標準的 <strong>C 字缺口環</strong>。<br>
+        請依據缺口朝向的方向，立刻按下鍵盤對應的方向鍵：<br>
+        <span class="key-hint">⬅️ 缺口向左</span> 
+        <span class="key-hint">⬆️ 缺口向上</span> 
+        <span class="key-hint">➡️ 缺口向右</span> 
+        <span class="key-hint">⬇️ 缺口向下</span><br>
+        <small style="color: #666;">（總共 20 題，請盡力憑直覺作答！）</small>
+    </p>
+    <button class="btn" onclick="startGame()">開始測驗</button>
+</div>
+
+<!-- 遊戲進行中的全螢幕隨機出現區域 -->
+<div id="game-area">
+    <svg id="stimulus-display" class="stimulus hidden" viewBox="0 0 100 100">
+        <defs>
+            <!-- 完美的標準 C 字遮罩（開口固定向右） -->
+            <mask id="c-ring-mask">
+                <circle cx="50" cy="50" r="40" fill="white" />
+                <circle cx="50" cy="50" r="20" fill="black" />
+                <rect x="60" y="40" width="30" height="20" fill="black" />
+            </mask>
+        </defs>
+        <!-- 套用遮罩的正圓環形 -->
+        <rect x="0" y="0" width="100" height="100" fill="#2c3e50" mask="url(#c-ring-mask)" />
+    </svg>
+</div>
+
+<div class="container hidden" id="result-screen">
+    <h1>測驗結束</h1>
+    <p id="result-text">您的表現非常棒！</p>
+    <div id="stats">
+        <div id="avg-time">平均反應時間：0 毫秒</div>
+        <div id="accuracy" style="margin-top: 10px;">正確率：0%</div>
+    </div>
+    <button class="btn" onclick="restartGame()">重新測驗</button>
+</div>
+
+<script>
+    // 嚴格對應正上下左右四個方向（0=右, 90=下, 180=左, 270=上）
+    const stimuliList = [
+        { rotation: 180, key: 'ArrowLeft' },  // 缺口向左
+        { rotation: 270, key: 'ArrowUp' },    // 缺口向上
+        { rotation: 0,   key: 'ArrowRight' }, // 缺口向右
+        { rotation: 90,  key: 'ArrowDown' }   // 缺口向下
+    ];
+
+    let currentRound = 0;
+    const totalRounds = 20; 
+    let reactionTimes = [];
+    let correctCount = 0;
+    let startTime = 0;
+    let currentStimulus = null;
+    let isWaitingForStimulus = false;
+    let isWaitingForResponse = false;
+    let timeoutId = null;
+    let hideTimeoutId = null;
+
+    function startGame() {
+        document.getElementById('welcome-screen').classList.add('hidden');
+        document.getElementById('game-area').style.display = 'block'; 
+        currentRound = 0;
+        reactionTimes = [];
+        correctCount = 0;
+        nextRound();
+    }
+
+    function nextRound() {
+        if (currentRound >= totalRounds) {
+            endGame();
+            return;
+        }
+
+        currentRound++;
+        const display = document.getElementById('stimulus-display');
+        display.classList.add('hidden');
+
+        isWaitingForResponse = false;
+        isWaitingForStimulus = true;
+
+        const randomDelay = Math.random() * 1000 + 1500;
+
+        timeoutId = setTimeout(() => {
+            flashStimulus();
+        }, randomDelay);
+    }
+
+    function flashStimulus() {
+        if (!isWaitingForStimulus) return;
+
+        const randomIndex = Math.floor(Math.random() * stimuliList.length);
+        currentStimulus = stimuliList[randomIndex];
+
+        const display = document.getElementById('stimulus-display');
+        
+        // 設定旋轉角度改變 C 字缺口方向
+        display.style.transform = `translate(-50%, -50%) rotate(${currentStimulus.rotation}deg)`;
+
+        // 隨機座標 (15% ~ 85%)
+        const randomX = Math.random() * 70 + 15; 
+        const randomY = Math.random() * 70 + 15; 
+
+        display.style.left = randomX + 'vw';
+        display.style.top = randomY + 'vh';
+        display.classList.remove('hidden');
+
+        startTime = performance.now();
+        isWaitingForStimulus = false;
+        isWaitingForResponse = true;
+
+        // 0.8秒後自動消失
+        hideTimeoutId = setTimeout(() => {
+            if (isWaitingForResponse) {
+                isWaitingForResponse = false;
+                display.classList.add('hidden');
+                setTimeout(() => {
+                    nextRound();
+                }, 300);
+            }
+        }, 800); 
+    }
+
+    document.addEventListener('keydown', function(event) {
+        if (!isWaitingForResponse) return;
+
+        if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) {
+            isWaitingForResponse = false;
+            clearTimeout(hideTimeoutId); 
+
+            const endTime = performance.now();
+            const reactionTime = Math.round(endTime - startTime);
+
+            const display = document.getElementById('stimulus-display');
+            display.classList.add('hidden'); 
+
+            if (event.key === currentStimulus.key) {
+                reactionTimes.push(reactionTime);
+                correctCount++;
+            }
+
+            nextRound();
+        }
+    });
+
+    function endGame() {
+        document.getElementById('game-area').style.display = 'none'; 
+        document.getElementById('result-screen').classList.remove('hidden');
+
+        const avgTime = reactionTimes.length > 0 
+            ? Math.round(reactionTimes.reduce((a, b) => a + b, 0) / reactionTimes.length) 
+            : 0;
+        
+        const accuracy = Math.round((correctCount / totalRounds) * 100);
+
+        let feedback = "測驗完成！感謝您的參與！";
+        if (accuracy >= 80 && avgTime < 600) {
+            feedback = "太厲害了！反應速度非常敏捷且準確率高！";
+        } else if (accuracy >= 60) {
+            feedback = "表現平穩！手眼協調狀況相當不錯！";
+        }
+
+        document.getElementById('result-text').innerText = feedback;
+        document.getElementById('avg-time').innerText = `平均反應時間：${avgTime} 毫秒`;
+        document.getElementById('accuracy').innerText = `正確率：${accuracy}% (${correctCount}/${totalRounds})`;
+    }
+
+    function restartGame() {
+        document.getElementById('result-screen').classList.add('hidden');
+        startGame();
+    }
+</script>
+
+</body>
+</html>
